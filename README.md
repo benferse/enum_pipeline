@@ -3,8 +3,8 @@
 Provides a way to use enums to describe and execute ordered data pipelines. 🦀🐾
 
 [![CI](https://github.com/bengreenier/enum_pipeline/actions/workflows/rust.yml/badge.svg)](https://github.com/bengreenier/enum_pipeline/actions/workflows/rust.yml)
-![Crates.io](https://img.shields.io/crates/d/enum_pipeline)
-![docs.rs](https://img.shields.io/docsrs/enum_pipeline)
+[![Crates.io](https://img.shields.io/crates/d/enum_pipeline)](https://crates.io/crates/enum_pipeline)
+[![docs.rs](https://img.shields.io/docsrs/enum_pipeline)](https://docs.rs/enum_pipeline)
 
 I needed a succinct way to describe 2d pixel map operations for a game I'm working on. I wanted callers to be able to easily determine all possible operations (hence `enum`), with per-operation data (hence variants), and their operation-specific logic (proc-macro coming soon). This is what I came up with!
 
