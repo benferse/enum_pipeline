@@ -2,6 +2,7 @@
 
 Provides a way to use enums to describe and execute ordered data pipelines. 🦀🐾
 
+[![CI](https://github.com/bengreenier/enum_pipeline/actions/workflows/rust.yml/badge.svg)](https://github.com/bengreenier/enum_pipeline/actions/workflows/rust.yml)
 ![Crates.io](https://img.shields.io/crates/d/enum_pipeline)
 ![docs.rs](https://img.shields.io/docsrs/enum_pipeline)
 
