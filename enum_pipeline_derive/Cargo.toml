@@ -2,6 +2,8 @@
 name = "enum_pipeline_derive"
 version = "0.1.0"
 edition = "2018"
+description = "Provides macros for enum_pipeline crate."
+license = "MIT"
 
 [lib]
 proc-macro = true
