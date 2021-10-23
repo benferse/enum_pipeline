@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 /// Provides an execute handler for pipelines.
 pub trait Execute {
     /// Execute a pipeline call to this instance.
@@ -8,181 +6,173 @@ pub trait Execute {
 }
 
 /// Provides an execute handler for pipelines, with a argument of type `TArg`.
-pub trait ExecuteWith<TArg> {
+pub trait ExecuteWith<TArg: ?Sized> {
     /// Execute a pipeline call to this instance with an argument.
     /// Responsible for invoking the relevant handler(s).
-    fn execute(self, arg: &TArg);
+    fn execute_with(self, arg: &TArg);
 }
 
 /// Provides an Execute handler for pipelines, with a mutable argument of type `TArg`.
-pub trait ExecuteWithMut<TArg> {
+pub trait ExecuteWithMut<TArg: ?Sized> {
     /// Execute a pipeline call to this instance with a mutable argument.
     /// Responsible for invoking the relevant handler(s).
-    fn execute(self, arg: &mut TArg);
+    fn execute_with_mut(self, arg: &mut TArg);
 }
 
-/// A pipeline vector which represents a series of `Execute`-able operations.
-pub struct PipelineVec<T> {
-    /// The ordered step of operations.
-    steps: Vec<T>,
-}
-
-/// `Execute`-ing to a `PipelineVec<T>` executing the `steps` in order.
-impl<T> Execute for PipelineVec<T>
+/// Blanket implementation of the [`Execute`] trait for any type
+/// that can be converted to an [`Iterator`] over some type that
+/// also implements [`Execute`]
+///
+/// ## Example
+///
+/// ```
+/// use enum_pipeline::Execute;
+/// use std::cell::RefCell;
+///
+/// enum Operations<'a> {
+///     AddOne(&'a RefCell<u32>),
+///     AddTwo(&'a RefCell<u32>),
+/// }
+///
+/// impl Execute for Operations<'_> {
+///     fn execute(self) {
+///         match self {
+///             Operations::AddOne(cell) => *cell.borrow_mut() += 1,
+///             Operations::AddTwo(cell) => *cell.borrow_mut() += 2,
+///         }
+///     }
+/// }
+///
+/// let acc = RefCell::new(0u32);
+/// let my_op_pipeline = vec![
+///     Operations::AddOne(&acc),
+///     Operations::AddTwo(&acc),
+///     Operations::AddTwo(&acc),
+/// ];
+///
+/// my_op_pipeline.execute();
+/// assert_eq!(5, *acc.borrow());
+/// ```
+impl<T> Execute for T
 where
-    T: Execute,
+    T: IntoIterator,
+    T::Item: Execute,
 {
     fn execute(self) {
-        for step in self.steps {
-            step.execute()
-        }
+        // This is morally equivalent to a for loop or
+        // a while let binding, but [`for_each`] has the opportunity
+        // to be quicker in some cases if `T` is an adapter
+        // like [`Chain`]
+        self.into_iter().for_each(move |item| item.execute());
     }
 }
 
-/// A pipeline vector which represents a series of `ExecuteWith`-able operations with an argument of type `TArg`.
-pub struct PipelineVecWith<T, TArg> {
-    /// The ordered step of operations.
-    steps: Vec<T>,
-
-    /// Phantom data to remember the argument type with.
-    arg_type: PhantomData<TArg>,
-}
-
-/// `Execute`-ing to a `PipelineVecWith<T, TArg>` executes the `steps` in order, passing `arg` along.
-impl<T, TArg> ExecuteWith<TArg> for PipelineVecWith<T, TArg>
+/// Blanket implementation of the [`ExecuteWith`] trait for any type
+/// that can be converted to an [`Iterator`] over some type that
+/// also implements [`ExecuteWith`]
+///
+/// ## Example
+///
+/// ```
+/// use enum_pipeline::ExecuteWith;
+/// use std::cell::RefCell;
+///
+/// enum Operations {
+///     Allocate(f32, f32),
+///     Init,
+///     Run(f32),
+/// }
+///
+/// impl ExecuteWith<RefCell<String>> for Operations {
+///     fn execute_with(self, arg: &RefCell<String>) {
+///         match self {
+///             Operations::Allocate(_, _) => arg.borrow_mut().push_str("[alloc]"),
+///             Operations::Init => arg.borrow_mut().push_str("[init]"),
+///             Operations::Run(_) => arg.borrow_mut().push_str("[run]"),
+///         }
+///     }
+/// }
+///
+/// let my_op_pipeline = vec![
+///     Operations::Init,
+///     Operations::Allocate(1.0, 1.0),
+///     Operations::Run(1.0),
+/// ];
+///
+/// let arg = RefCell::new(String::from(""));
+/// my_op_pipeline.execute_with(&arg);
+/// assert_eq!(*arg.borrow(), String::from("[init][alloc][run]"));
+/// ```
+impl<T, TArg: ?Sized> ExecuteWith<TArg> for T
 where
-    T: ExecuteWith<TArg>,
+    T: IntoIterator,
+    T::Item: ExecuteWith<TArg>,
 {
-    fn execute(self, arg: &TArg) {
-        for step in self.steps {
-            step.execute(arg)
-        }
+    fn execute_with(self, arg: &TArg) {
+        // This is morally equivalent to a for loop or
+        // a while let binding, but [`for_each`] has the opportunity
+        // to be quicker in some cases if `T` is an adapter
+        // like [`Chain`]
+        self.into_iter()
+            .for_each(move |item| item.execute_with(arg));
     }
 }
 
-/// `Execute`-ing to a `PipelineVecWith<T, TArg>` executes the `steps` in order, passing a mutable `arg` along.
-impl<T, TArg> ExecuteWithMut<TArg> for PipelineVecWith<T, TArg>
+/// Blanket implementation of the [`ExecuteWithMut`] trait for any type
+/// that can be converted to an [`Iterator`] over some type that
+/// also implements [`ExecuteWithMut`]
+///
+/// ## Example
+///
+/// ```
+/// use enum_pipeline::ExecuteWithMut;
+///
+/// enum Operations {
+///     Allocate(f32, f32),
+///     Init,
+///     Run(f32),
+/// }
+///
+/// impl<T> ExecuteWithMut<T> for Operations where T: std::ops::AddAssign<u32> {
+///     fn execute_with_mut(self, arg: &mut T) {
+///         match self {
+///             Operations::Allocate(_, _) => *arg += 2,
+///             Operations::Init => *arg += 3,
+///             Operations::Run(_) => *arg += 5,
+///         }
+///     }
+/// }
+///
+/// fn do_work_with_mut() {
+///     let my_op_pipeline = vec![
+///         Operations::Init,
+///         Operations::Allocate(1.0, 1.0),
+///         Operations::Run(1.0),
+///     ];
+///
+///     let mut acc = 0;
+///     my_op_pipeline.execute_with_mut(&mut acc);
+///     assert_eq!(acc, 10);
+/// }
+/// ```
+impl<T, TArg: ?Sized> ExecuteWithMut<TArg> for T
 where
-    T: ExecuteWithMut<TArg>,
+    T: IntoIterator,
+    T::Item: ExecuteWithMut<TArg>,
 {
-    fn execute(self, arg: &mut TArg) {
-        for step in self.steps {
-            step.execute(arg)
-        }
-    }
-}
-
-/// Provides a way to convert into a `PipelineVec` for ordered execution.
-pub trait IntoPipelineVec<T>
-where
-    T: Execute,
-{
-    /// Creates a `PipelineVec` that can be executed, consuming the source.
-    fn into_pipeline(self) -> PipelineVec<T>;
-}
-
-/// Provides a way to convert into a `PipelineVecWith` for ordered execution with an argument of type `TArg`.
-pub trait IntoPipelineVecWith<T, TArg>
-where
-    T: ExecuteWith<TArg>,
-{
-    /// Creates a `PipelineVecWith` that can be executed with an argument, consuming the source.
-    fn into_pipeline(self) -> PipelineVecWith<T, TArg>;
-}
-
-/// Provides a way to convert into a `PipelineVecWith` for ordered execution with a mutable argument of type `TArg`.
-pub trait IntoPipelineVecWithMut<T, TArg>
-where
-    T: ExecuteWithMut<TArg>,
-{
-    /// Creates a `PipelineVecWith` that can be executed with a mutable argument, consuming the source.
-    fn into_pipeline(self) -> PipelineVecWith<T, TArg>;
-}
-
-/// Provides a way to convert a `Vec<>` of `Execute`-able elements into a `PipelineVec` for execution.
-impl<T> IntoPipelineVec<T> for Vec<T>
-where
-    T: Execute,
-{
-    /// Creates a `PipelineVec` that can be executed, consuming the source `Vec`.
-    fn into_pipeline(self) -> PipelineVec<T> {
-        PipelineVec { steps: self }
-    }
-}
-
-/// Provides a way to convert a `Vec<>` of `Execute`-able elements into a `PipelineVecWith` for ordered execution with an argument of type `TArg`.
-impl<T, TArg> IntoPipelineVecWith<T, TArg> for Vec<T>
-where
-    T: ExecuteWith<TArg>,
-{
-    /// Creates a `PipelineVecWith` that can be executed with an argument, consuming the source `Vec`.
-    fn into_pipeline(self) -> PipelineVecWith<T, TArg> {
-        PipelineVecWith {
-            steps: self,
-            arg_type: PhantomData,
-        }
-    }
-}
-
-/// Provides a way to convert a `Vec<>` of `Execute`-able elements into a `PipelineVecWithMut` for ordered execution with an argument of type `TArg`.
-impl<T, TArg> IntoPipelineVecWithMut<T, TArg> for Vec<T>
-where
-    T: ExecuteWithMut<TArg>,
-{
-    /// Creates a `PipelineVecWith` that can be executed with a mutable argument, consuming the source `Vec`.
-    fn into_pipeline(self) -> PipelineVecWith<T, TArg> {
-        PipelineVecWith {
-            steps: self,
-            arg_type: PhantomData,
-        }
-    }
-}
-
-#[cfg(test)]
-mod readme_test {
-    use crate::{Execute, IntoPipelineVec};
-
-    enum Operations {
-        Allocate(f32, f32),
-        Init,
-        Run(f32),
-    }
-
-    impl Execute for Operations {
-        fn execute(self) {
-            match self {
-                Operations::Allocate(_x, _y) => println!("allocate something"),
-                Operations::Init => println!("init"),
-                Operations::Run(_delta) => println!("do work"),
-            }
-        }
-    }
-
-    #[test]
-    fn do_work() {
-        let my_op_pipeline = vec![
-            Operations::Init,
-            Operations::Allocate(1.0, 1.0),
-            Operations::Init,
-            Operations::Run(1.0),
-        ]
-        .into_pipeline();
-
-        my_op_pipeline.execute();
-        // prints:
-        // init
-        // allocate something
-        // init
-        // do work
+    fn execute_with_mut(self, arg: &mut TArg) {
+        // This is morally equivalent to a for loop or
+        // a while let binding, but [`for_each`] has the opportunity
+        // to be quicker in some cases if `T` is an adapter
+        // like [`Chain`]
+        self.into_iter()
+            .for_each(move |item| item.execute_with_mut(arg));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        Execute, ExecuteWith, ExecuteWithMut, IntoPipelineVec, IntoPipelineVecWith,
-        IntoPipelineVecWithMut,
-    };
+    use crate::{Execute, ExecuteWith, ExecuteWithMut};
     use enum_pipeline_derive::Execute;
 
     #[derive(Execute)]
@@ -212,7 +202,7 @@ mod tests {
 
     #[test]
     fn void_dispatch_works() {
-        let pipeline = vec![VoidDispatchPipeline::One, VoidDispatchPipeline::Two].into_pipeline();
+        let pipeline = vec![VoidDispatchPipeline::One, VoidDispatchPipeline::Two];
 
         pipeline.execute();
 
@@ -249,7 +239,7 @@ mod tests {
     }
 
     impl ExecuteWith<RefDataPipelineData> for RefDataPipeline {
-        fn execute(self, arg: &RefDataPipelineData) {
+        fn execute_with(self, arg: &RefDataPipelineData) {
             match self {
                 RefDataPipeline::One(f) => RefDataPipeline::handle_one(f, arg),
                 RefDataPipeline::Two => RefDataPipeline::handle_two(arg),
@@ -259,11 +249,11 @@ mod tests {
 
     #[test]
     fn ref_data_pipeline_works() {
-        let pipeline = vec![RefDataPipeline::One(24.0), RefDataPipeline::Two].into_pipeline();
+        let pipeline = vec![RefDataPipeline::One(24.0), RefDataPipeline::Two];
 
         let data = RefDataPipelineData { mult: 2.0 };
 
-        pipeline.execute(&data);
+        pipeline.execute_with(&data);
 
         unsafe {
             assert_eq!(48.0, REF_ONE_VALUE);
@@ -284,7 +274,7 @@ mod tests {
 
     // no macro yet, srry
     impl ExecuteWithMut<MutDataPipelineData> for MutDataPipeline {
-        fn execute(self, arg: &mut MutDataPipelineData) {
+        fn execute_with_mut(self, arg: &mut MutDataPipelineData) {
             match self {
                 MutDataPipeline::One(f) => arg.one_value += f,
                 MutDataPipeline::Two => arg.two_count += 1,
@@ -294,10 +284,10 @@ mod tests {
 
     #[test]
     fn mut_data_pipeline_works() {
-        let pipeline = vec![MutDataPipeline::One(12.0), MutDataPipeline::Two].into_pipeline();
+        let pipeline = vec![MutDataPipeline::One(12.0), MutDataPipeline::Two];
 
         let mut data = MutDataPipelineData::default();
-        pipeline.execute(&mut data);
+        pipeline.execute_with_mut(&mut data);
 
         assert_eq!(12.0, data.one_value);
         assert_eq!(1, data.two_count);
